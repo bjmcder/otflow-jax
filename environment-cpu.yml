@@ -1,0 +1,20 @@
+name: otflow-jax
+
+channels:
+  - conda-forge
+dependencies:
+  - numpy
+  - scipy
+  - matplotlib
+  - scikit-learn
+  - pandas
+  - pytest
+  - black
+  - pip
+  - pip:
+      - jax
+      - jaxlib
+      - diffrax
+      - equinox
+      - optax
+      
