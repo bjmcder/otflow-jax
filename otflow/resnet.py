@@ -87,9 +87,9 @@ class ResNet(eqx.Module):
         for i in range(self.num_hidden_layers-1):
 
             newlayer = eqx.nn.Linear(self.hidden_dimension,
-                                             self.hidden_dimension,
-                                             use_bias=True,
-                                             key=keys[i])
+                                     self.hidden_dimension,
+                                     use_bias=True,
+                                     key=keys[i])
 
         if test_mode:
             w_init = jnn.initializers.constant(0.3)
@@ -99,7 +99,7 @@ class ResNet(eqx.Module):
                                    w_init(keys[i], newlayer.weight.shape))
             newlayer = eqx.tree_at(lambda l: l.bias,
                                    newlayer,
-                                    b_init(keys[i], newlayer.bias.shape))
+                                   b_init(keys[i], newlayer.bias.shape))
 
             self.layers.append(newlayer)
 

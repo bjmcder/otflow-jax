@@ -104,21 +104,18 @@ class PotentialOperator(eqx.Module):
 
         # 1. Get the Jacobian by manual backpropagation
 
-        # Symmetrize A by doing: A'A
+        # Symmetrize A by doing: A_symm = A'A
         A_symm = self.A.T @ self.A
 
         # Evaluate forward and reverse passes of the ResNet
         u, z = self.N.evaluate(x, self.w.weight)
 
         # Calculate the gradients from the forward/reverse results
-        z_0 = z[0,0:d+1]
-        print("z")
-        print(z)
+        z_0 = z[0, 0:d+1]
+        grad = z_0 + (A_symm @ x.T) + self.c.weight
 
-        grad = (z_0 + (A_symm @ x.T) + self.c.weight.T)
-        print(grad)
         if grad_only:
-            return grad.T
+            return grad, None
 
         # 2. Compute the Hessian trace
         dtanh = lambda x: 1 - jnp.power(jax.nn.tanh(x), 2)
@@ -129,21 +126,35 @@ class PotentialOperator(eqx.Module):
         # Opening layer trace
         K_0d = self.N.layers[0].weight[:, 0:d]
 
-        t_0a =  dtanh_0 @ z[1]
+        t_0a =  dtanh_0.T * z[1]
         t_0b = jnp.power(K_0d, 2)
 
-        t_0 = jnp.sum(t_0a * t_0b)
-        t_ia = tanh_0
-
-        pad_size = jnp.abs(m-d)
-        J = jnp.pad((K_0d.T @ t_ia), (0, pad_size))
+        tr_h = jnp.sum(t_0a * t_0b.T)
+        J = (K_0d.T * tanh_0)
 
         # Remaining layers
         for i in range(1, self.N.num_hidden_layers):
             K_id = self.N.layers[i].weight
+            KJ_i = K_id @ J.T
 
-            KJ = K_id.T @ J
+            if i == self.N.num_hidden_layers-1:
+                term = self.w.weight.T
+            else:
+                term = z[i+1]
 
+            lay_i = self.N.evaluate_layer(u[i-1], i)
+            tanh_i = jax.nn.tanh(lay_i)
+            dtanh_i = dtanh(lay_i)
+
+            t_ia = dtanh_i * term.T
+            t_ib = jnp.power(KJ_i, 2)
+            t_i = jnp.sum(t_ia  * t_ib.T)
+
+            tr_h += h*t_i
+
+        tr_h += jnp.trace(A_symm[0:d,0:d])
+
+        return grad, tr_h
 
 if __name__ == "__main__":
 
@@ -163,7 +174,13 @@ if __name__ == "__main__":
 
     y = jax.vmap(phi)(s)
 
-    jax.vmap(phi.hessian_trace)(s)
+    g, h = jax.vmap(phi.hessian_trace)(s)
+
+    print("manual grad")
+    print(g)
+    print("hessian_trace")
+    print(h)
+
     j = jax.vmap(phi.jacobian)(s)
     print("autodiff jacobian")
     print(j)
