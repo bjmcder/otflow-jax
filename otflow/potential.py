@@ -115,7 +115,7 @@ class PotentialOperator(eqx.Module):
         grad = z_0 + (A_symm @ x.T) + self.c.weight
 
         if grad_only:
-            return grad, None
+            return grad.squeeze(0), None
 
         # 2. Compute the Hessian trace
         dtanh = lambda x: 1 - jnp.power(jax.nn.tanh(x), 2)
@@ -154,16 +154,16 @@ class PotentialOperator(eqx.Module):
 
         tr_h += jnp.trace(A_symm[0:d,0:d])
 
-        return grad, tr_h
+        return grad.squeeze(0), tr_h
 
 if __name__ == "__main__":
 
     import time
-    s = jnp.array([[1.0, 4.0, 0.5]])
-    #s = jnp.array([[1.0, 4.0, 0.5],
-    #               [2.0, 5.0, 0.6],
-    #               [3.0, 6.0, 0.7],
-    #               [0.0, 0.0, 0.0]])
+
+    s = jnp.array([[1.0, 4.0, 0.5],
+                   [2.0, 5.0, 0.6],
+                   [3.0, 6.0, 0.7],
+                   [0.0, 0.0, 0.0]])
 
     in_size = 2
     hidden_size = 5
@@ -181,20 +181,16 @@ if __name__ == "__main__":
     print("hessian_trace")
     print(h)
 
-    j = jax.vmap(phi.jacobian)(s)
-    print("autodiff jacobian")
-    print(j)
+    d = 400
+    m = 32
+    nex = 1000
 
-    #d = 400
-    #m = 32
-    #nex = 1000
+    net2 = PotentialOperator(d, m, 5)
 
-    #net2 = PotentialOperator(d, m, 5)
-
-    #key = jr.PRNGKey(25)
-    #x = jr.normal(key, [nex,d+1])
+    key = jr.PRNGKey(25)
+    x = jr.normal(key, [nex,d+1])
     #y = jax.vmap(net2)(x)
 
-    #end = time.time()
-    #h = jax.vmap(net2.jacobian)(x)
-    #print('traceHess takes ', time.time()-end)
+    end = time.time()
+    h = jax.vmap(net2.hessian_trace)(x)
+    print('traceHess takes ', time.time()-end)

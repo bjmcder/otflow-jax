@@ -83,23 +83,23 @@ class ResNet(eqx.Module):
         self.layers.append(opening_layer)
 
         # Create the hidden layers
+
         keys = jr.split(key, self.num_hidden_layers-1)
         for i in range(self.num_hidden_layers-1):
-
             newlayer = eqx.nn.Linear(self.hidden_dimension,
                                      self.hidden_dimension,
                                      use_bias=True,
                                      key=keys[i])
 
-        if test_mode:
-            w_init = jnn.initializers.constant(0.3)
-            b_init = jnn.initializers.constant(0.3)
-            newlayer = eqx.tree_at(lambda l: l.weight,
-                                   newlayer,
-                                   w_init(keys[i], newlayer.weight.shape))
-            newlayer = eqx.tree_at(lambda l: l.bias,
-                                   newlayer,
-                                   b_init(keys[i], newlayer.bias.shape))
+            if test_mode:
+                w_init = jnn.initializers.constant(0.3)
+                b_init = jnn.initializers.constant(0.3)
+                newlayer = eqx.tree_at(lambda l: l.weight,
+                                    newlayer,
+                                    w_init(keys[i], newlayer.weight.shape))
+                newlayer = eqx.tree_at(lambda l: l.bias,
+                                    newlayer,
+                                    b_init(keys[i], newlayer.bias.shape))
 
             self.layers.append(newlayer)
 
@@ -205,7 +205,7 @@ class ResNet(eqx.Module):
             K_i = self.layers[i].weight
             dlayer = jax.nn.tanh(self.layers[i](u[i-1]))
             hku = jnp.expand_dims(h*(K_i.T @ dlayer).T, axis=1)
-
+            term = term.reshape(term.shape[0],1)
             new_z = (term + jnp.multiply(hku, term)).squeeze(1)
             z = z.at[i].set(new_z)
 
@@ -219,7 +219,8 @@ class ResNet(eqx.Module):
 
         # Pad the results with zeros at the end so the dimensions match
         pad_size = jnp.abs(self.hidden_dimension - self.input_dimension)
-
+        print(pad_size)
+        print(product.shape)
         z = z.at[0,0:pad_size].set(product)
 
         return z
