@@ -22,8 +22,7 @@ class ResNet(eqx.Module):
                  in_size: int,
                  hidden_size: int,
                  num_hidden: int = 2,
-                 seed: int = 0,
-                 test_mode = False):
+                 seed: int = 0):
         """
         Class Constructor for ResNet.
 
@@ -53,23 +52,12 @@ class ResNet(eqx.Module):
         # Initialize the PRNG state with a user-provided seed
         key = jr.PRNGKey(seed)
 
-        # Create the first layer, mapping the input size to the hidden layer
+        # Create the first layer, which maps the input size to the hidden layer
         # size
         opening_layer = eqx.nn.Linear(self.input_dimension+1,
                                       self.hidden_dimension,
                                       use_bias=True,
                                       key=key)
-
-        if test_mode:
-            w0_init = jnn.initializers.constant(0.1)
-            b0_init = jnn.initializers.constant(0.2)
-
-            opening_layer = eqx.tree_at(lambda l: l.weight,
-                                        opening_layer,
-                                        w0_init(key, opening_layer.weight.shape))
-            opening_layer = eqx.tree_at(lambda l: l.bias,
-                                        opening_layer,
-                                        b0_init(key, opening_layer.bias.shape))
 
         # For the activation function, we use the antiderivative of the tanh
         # function. This helps with analytic gradients downstream in the
@@ -83,7 +71,6 @@ class ResNet(eqx.Module):
         self.layers.append(opening_layer)
 
         # Create the hidden layers
-
         keys = jr.split(key, self.num_hidden_layers-1)
         for i in range(self.num_hidden_layers-1):
             newlayer = eqx.nn.Linear(self.hidden_dimension,
@@ -91,21 +78,11 @@ class ResNet(eqx.Module):
                                      use_bias=True,
                                      key=keys[i])
 
-            if test_mode:
-                w_init = jnn.initializers.constant(0.3)
-                b_init = jnn.initializers.constant(0.3)
-                newlayer = eqx.tree_at(lambda l: l.weight,
-                                    newlayer,
-                                    w_init(keys[i], newlayer.weight.shape))
-                newlayer = eqx.tree_at(lambda l: l.bias,
-                                    newlayer,
-                                    b_init(keys[i], newlayer.bias.shape))
-
             self.layers.append(newlayer)
 
     def __call__(self, x):
         """
-        Convenience function for invoking the forward model.
+        Convenience function for invoking the forward pass of the model.
 
         Parameters
         ----------
@@ -116,6 +93,7 @@ class ResNet(eqx.Module):
         -------
         jax.numpy.ndarray
         """
+
         return self.forward(x)
 
     def forward(self, x):
@@ -158,9 +136,88 @@ class ResNet(eqx.Module):
         """
         return self.layers[layer_idx](x)
 
+    def initialize_layer_params(self,
+                                key: jax.random.PRNGKey,
+                                layer_idx: int,
+                                w_init: jax.nn.initializers.Initializer,
+                                b_init: jax.nn.initializers.Initializer):
+        """
+        Initialize the weights and biases of a layer using custom initializers.
+        This overrides the default Equinox random normal initializer.
+
+        Parameters
+        ----------
+        key : jax.random.PRNGKey
+            Random key needed by initializers
+        layer_idx : int
+            Index of the layer being initialized.
+        w_init : jax.nn.initializers.Initializer
+            Initializer for the layer weights.
+        b_init : jax.nn.initializers.Initializer
+            Initializer for the layer biases.
+        """
+        key1, key2 = jr.split(key, 2)
+
+        self.initialize_layer_weights(key1, layer_idx, w_init)
+        self.initialize_layer_biases(key2, layer_idx, b_init)
+
+    def initialize_layer_weights(self,
+                                 key: jax.random.PRNGKey,
+                                 layer_idx: int,
+                                 w_init: jax.nn.initializers.Initializer):
+        """
+        Initialize the weights of a layer using custom initializers. This
+        overrides the default Equinox random normal initializer.
+
+        Parameters
+        ----------
+        key : jax.random.PRNGKey
+            Random key needed by initializers
+        layer_idx : int
+            Index of the layer being initialized.
+        w_init : jax.nn.initializers.Initializer
+            Initializer for the layer weights.
+        """
+        param_select = lambda layer: layer.weight
+        init_func = w_init(key, self.layers[layer_idx].weight.shape)
+
+        self.layers[layer_idx] = eqx.tree_at(param_select,
+                                             self.layers[layer_idx],
+                                             init_func)
+
+    def initialize_layer_biases(self,
+                                key: jax.random.PRNGKey,
+                                layer_idx: int,
+                                b_init: jax.nn.initializers.Initializer):
+        """
+        Initialize the biases of a layer using custom initializers. This
+        overrides the default Equinox random normal initializer.
+
+        Parameters
+        ----------
+        key : jax.random.PRNGKey
+            Random key needed by initializers
+        layer_idx : int
+            Index of the layer being initialized.
+        b_init : jax.nn.initializers.Initializer
+            Initializer for the layer biases.
+        """
+        param_select = lambda layer: layer.bias
+        init_func = b_init(key, self.layers[layer_idx].bias.shape)
+
+        self.layers[layer_idx] = eqx.tree_at(param_select,
+                                             self.layers[layer_idx],
+                                             init_func)
+
     def evaluate_forward(self, x):
         """
-        Invoke the forward pass of the model, and store all intermediate layer values.
+        Invoke the forward pass of the model, storing all intermediate
+        activation values.
+
+        Parameters
+        ----------
+        x : jax.numpy.ndarray
+            Forward input data vector.
         """
 
         u = jnp.zeros([self.num_hidden_layers,self.hidden_dimension])
@@ -192,7 +249,7 @@ class ResNet(eqx.Module):
         h = self.step_size
         n = self.num_hidden_layers
 
-        z = jnp.zeros([self.num_hidden_layers, self.hidden_dimension])
+        z = jnp.zeros([self.num_hidden_layers-1, self.hidden_dimension])
 
         # Evaluate the layers in revese order, storing the intermediate
         # activations in z.
@@ -204,45 +261,39 @@ class ResNet(eqx.Module):
 
             K_i = self.layers[i].weight
             dlayer = jax.nn.tanh(self.layers[i](u[i-1]))
+
             hku = jnp.expand_dims(h*(K_i.T @ dlayer).T, axis=1)
             term = term.reshape(term.shape[0],1)
+
             new_z = (term + jnp.multiply(hku, term)).squeeze(1)
-            z = z.at[i].set(new_z)
+            z = z.at[i-1].set(new_z)
 
-
-        # Finally, handle the input layer, which is not necessarily the same
-        # size as the hidden layers
+        # Finally, handle the input layer separately, which is not necessarily
+        # the same size as the hidden layers
         K_0 = self.layers[0].weight
         tanh_0 = jax.nn.tanh(self.evaluate_layer(x, 0))
 
-        product = K_0.T @ (tanh_0.T * z[1])
+        z_0 = K_0.T @ (tanh_0.T * z[1])
 
-        # Pad the results with zeros at the end so the dimensions match
-        pad_size = jnp.abs(self.hidden_dimension - self.input_dimension)
-        print(pad_size)
-        print(product.shape)
-        z = z.at[0,0:pad_size].set(product)
-
-        return z
+        return z_0, z
 
     def evaluate(self, x, w):
         """
-        Evaluate the forward and reverse passes.
+        Evaluate the forward and reverse passes, storing the intermediate
+        activations of each.
+
+        Parameters
+        ----------
+        x : jax.numpy.ndarray
+            Forward input data vector.
+        w : jax.numpy.ndarray
+            Reverse input data vector.
         """
 
         fwd = jax.jit(self.evaluate_forward)
         rev = self.evaluate_reverse
 
         u = fwd(x)
-        z = rev(x, w, u)
+        z_0, z = rev(x, w, u)
 
-        return u, z
-
-    def jac(self, x):
-        """
-        Return the Jacobian with respect to an input tensor x.
-        """
-
-        jfunc = jax.jacobian(self.forward)
-
-        return jfunc(x)
+        return u, z_0, z

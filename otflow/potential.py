@@ -1,9 +1,9 @@
 import jax
 
 import equinox as eqx
+import jax.nn as jnn
 import jax.numpy as jnp
 import jax.random as jr
-import jax.nn as jnn
 
 from otflow.resnet import ResNet
 
@@ -18,8 +18,7 @@ class PotentialOperator(eqx.Module):
                  hidden_size,
                  num_hidden=2,
                  rank=10,
-                 seed=0,
-                 test_mode=False):
+                 seed=0):
         """
         Class constructor
         """
@@ -35,8 +34,7 @@ class PotentialOperator(eqx.Module):
         self.N = ResNet(in_size,
                         hidden_size,
                         num_hidden,
-                        seed=seed_n,
-                        test_mode=test_mode)
+                        seed=seed_n)
 
         # Create the A matrix operator
         a_init = jnn.initializers.glorot_uniform()
@@ -99,7 +97,6 @@ class PotentialOperator(eqx.Module):
         """
 
         d = self.N.input_dimension
-        m = self.N.hidden_dimension
         h = self.N.step_size
 
         # 1. Get the Jacobian by manual backpropagation
@@ -108,10 +105,9 @@ class PotentialOperator(eqx.Module):
         A_symm = self.A.T @ self.A
 
         # Evaluate forward and reverse passes of the ResNet
-        u, z = self.N.evaluate(x, self.w.weight)
+        u, z_0, z = self.N.evaluate(x, self.w.weight)
 
         # Calculate the gradients from the forward/reverse results
-        z_0 = z[0, 0:d+1]
         grad = z_0 + (A_symm @ x.T) + self.c.weight
 
         if grad_only:
@@ -126,16 +122,13 @@ class PotentialOperator(eqx.Module):
         # Opening layer trace
         K_0d = self.N.layers[0].weight[:, 0:d]
 
-        t_0a =  dtanh_0.T * z[1]
-        t_0b = jnp.power(K_0d, 2)
-
-        tr_h = jnp.sum(t_0a * t_0b.T)
-        J = (K_0d.T * tanh_0)
+        tr_h = jnp.sum((dtanh_0.T * z[0]) * jnp.power(K_0d, 2).T)
+        jac = (K_0d.T * tanh_0)
 
         # Remaining layers
         for i in range(1, self.N.num_hidden_layers):
             K_id = self.N.layers[i].weight
-            KJ_i = K_id @ J.T
+            KJ_i = K_id @ jac.T
 
             if i == self.N.num_hidden_layers-1:
                 term = self.w.weight.T
@@ -143,7 +136,6 @@ class PotentialOperator(eqx.Module):
                 term = z[i+1]
 
             lay_i = self.N.evaluate_layer(u[i-1], i)
-            tanh_i = jax.nn.tanh(lay_i)
             dtanh_i = dtanh(lay_i)
 
             t_ia = dtanh_i * term.T
@@ -170,27 +162,28 @@ if __name__ == "__main__":
     num_hidden = 2
     seed = 0
 
-    phi = PotentialOperator(in_size, hidden_size, num_hidden, test_mode=True)
-
-    y = jax.vmap(phi)(s)
+    phi = PotentialOperator(in_size, hidden_size, num_hidden)
 
     g, h = jax.vmap(phi.hessian_trace)(s)
 
-    print("manual grad")
-    print(g)
-    print("hessian_trace")
-    print(h)
+    g_ref = jnp.array([[2.5680485, 1.7230235, 0.3075932],
+                       [ 4.155053, 2.2732747, -0.26098657],
+                       [ 5.7059603, 2.7874281, -0.86566424],
+                       [ 0.22874565, 0.22874565, 0.22874565]])
+    h_ref = jnp.array([1.6357629, 1.599934, 1.5677052, 1.7060733])
+
 
     d = 400
     m = 32
+    nlay = 5
     nex = 1000
 
-    net2 = PotentialOperator(d, m, 5)
+    net2 = PotentialOperator(d, m, nlay, seed=seed)
 
     key = jr.PRNGKey(25)
     x = jr.normal(key, [nex,d+1])
-    #y = jax.vmap(net2)(x)
+    y = jax.vmap(net2)(x)
 
-    end = time.time()
-    h = jax.vmap(net2.hessian_trace)(x)
-    print('traceHess takes ', time.time()-end)
+    start = time.time()
+    g, h = jax.vmap(net2.hessian_trace)(x)
+    print('traceHess takes ', time.time()-start)
