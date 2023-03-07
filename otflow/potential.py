@@ -5,7 +5,7 @@ import jax.nn as jnn
 import jax.numpy as jnp
 import jax.random as jr
 
-from otflow.resnet import ResNet
+from resnet import ResNet
 
 class PotentialOperator(eqx.Module):
     N: eqx.Module
@@ -20,7 +20,7 @@ class PotentialOperator(eqx.Module):
                  rank=10,
                  seed=0):
         """
-        Class constructor
+        Class constructor.
         """
 
         key = jr.PRNGKey(seed)
@@ -58,6 +58,15 @@ class PotentialOperator(eqx.Module):
     def __call__(self, x:jnp.ndarray):
         """
         Convenience function for calling the forward pass.
+
+        Parameters
+        ----------
+        x : jax.numpy.ndarray
+            Input data vector.
+
+        Returns
+        -------
+        jax.numpy.ndarray
         """
 
         fwd = jax.jit(self.forward)
@@ -74,6 +83,10 @@ class PotentialOperator(eqx.Module):
         ----------
         x : jax.numpy.ndarray
             The input tensor, with the time variable concatenated.
+
+        Returns
+        -------
+        jax.numpy.ndarray
         """
 
         # Symmetrize A by doing: A'A
@@ -87,6 +100,19 @@ class PotentialOperator(eqx.Module):
         return wn + ax + bc
 
     def jacobian(self, x):
+        """
+        Compute the exact Jacobian matrix of the potential operator w.r.t. the
+        input vector x. Computation uses native Jax automatic differentiation.
+
+        Parameters
+        ----------
+        x : jax.numpy.ndarray
+            Input data vector.
+
+        Returns
+        -------
+        jax.numpy.ndarray
+        """
 
         jac = jax.jit(jax.jacobian(self.forward))
 
@@ -94,12 +120,31 @@ class PotentialOperator(eqx.Module):
 
     def hessian_trace(self, x, grad_only=False):
         """
+        Compute the gradient and exact Hessian trace of the potential operator
+        using the analytical method described in eqs. 11-15 of the OT-flow
+        paper.
+
+        Parameters
+        ----------
+        x : jax.numpy.ndarray
+            Input data vector
+        grad_only : bool
+            If True, compute the gradient only, skipping the Hessian trace
+            calculation.
+
+        Returns
+        -------
+        g : jax.numpy.ndarray
+            The gradient of the potential model w.r.t. the input vector x.
+        h : jax.numpy.ndarray
+            The exact Hessian trace w.r.t. the input vector x.
         """
 
         d = self.N.input_dimension
         h = self.N.step_size
 
-        # 1. Get the Jacobian by manual backpropagation
+        # 1. Compute the forward and backward passes of the ResNet model, which
+        # we will need for the Hessian calculation.
 
         # Symmetrize A by doing: A_symm = A'A
         A_symm = self.A.T @ self.A
@@ -119,13 +164,13 @@ class PotentialOperator(eqx.Module):
         tanh_0 = jax.nn.tanh(self.N.evaluate_layer(x,0))
         dtanh_0 = dtanh(self.N.evaluate_layer(x,0))
 
-        # Opening layer trace
+        # Compute the trace of the opening layer
         K_0d = self.N.layers[0].weight[:, 0:d]
 
         tr_h = jnp.sum((dtanh_0.T * z[0]) * jnp.power(K_0d, 2).T)
         jac = (K_0d.T * tanh_0)
 
-        # Remaining layers
+        # Compute the trace of the remaining layers
         for i in range(1, self.N.num_hidden_layers):
             K_id = self.N.layers[i].weight
             KJ_i = K_id @ jac.T
@@ -150,30 +195,40 @@ class PotentialOperator(eqx.Module):
 
 if __name__ == "__main__":
 
+    import os
     import time
+
+    in_size = 2
+    hidden_size = 5
+    num_hidden = 2
+    rank = 10
+    seed = 0
+
+    key = jr.PRNGKey(seed)
+
+    phi = PotentialOperator(in_size, hidden_size, num_hidden, rank, seed)
+
+    w0_init = jnn.initializers.constant(0.1)
+    b0_init = jnn.initializers.constant(0.2)
+
+    phi.N.initialize_layer_params(key, 0, w0_init, b0_init)
+
+
+    w_init = jnn.initializers.constant(0.3)
+    b_init = jnn.initializers.constant(0.3)
+    phi.N.initialize_layer_params(key, 1, w_init, b_init)
 
     s = jnp.array([[1.0, 4.0, 0.5],
                    [2.0, 5.0, 0.6],
                    [3.0, 6.0, 0.7],
                    [0.0, 0.0, 0.0]])
 
-    in_size = 2
-    hidden_size = 5
-    num_hidden = 2
-    seed = 0
+    y = jax.vmap(phi)(s)
 
-    phi = PotentialOperator(in_size, hidden_size, num_hidden)
-
-    g, h = jax.vmap(phi.hessian_trace)(s)
-
-    g_ref = jnp.array([[2.5680485, 1.7230235, 0.3075932],
-                       [ 4.155053, 2.2732747, -0.26098657],
-                       [ 5.7059603, 2.7874281, -0.86566424],
-                       [ 0.22874565, 0.22874565, 0.22874565]])
-    h_ref = jnp.array([1.6357629, 1.599934, 1.5677052, 1.7060733])
+    #jax.vmap(phi.N.forward_scan)(s)
 
 
-    d = 400
+    d = 200
     m = 32
     nlay = 5
     nex = 1000
@@ -183,7 +238,7 @@ if __name__ == "__main__":
     key = jr.PRNGKey(25)
     x = jr.normal(key, [nex,d+1])
     y = jax.vmap(net2)(x)
-
+    g, h = jax.vmap(net2.hessian_trace)(x)
     start = time.time()
     g, h = jax.vmap(net2.hessian_trace)(x)
     print('traceHess takes ', time.time()-start)

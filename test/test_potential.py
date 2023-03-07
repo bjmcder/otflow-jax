@@ -23,7 +23,7 @@ def phi_net_2x5x2():
     b0_init = jnn.initializers.constant(0.2)
 
     phi.N.initialize_layer_params(key, 0, w0_init, b0_init)
-
+    print(phi.N.layers[0].weight)
 
     w_init = jnn.initializers.constant(0.3)
     b_init = jnn.initializers.constant(0.3)
@@ -31,7 +31,9 @@ def phi_net_2x5x2():
 
     return phi
 
+
 def phi_net_8x5x5(scope='function'):
+
     in_size = 8
     hidden_size = 5
     num_hidden = 5
@@ -54,13 +56,12 @@ def phi_net_8x5x5(scope='function'):
 
     return phi
 
-def test_potential_forward(phi_net_2x5x2):
 
-    in_size = 8
-    hidden_size = 5
-    num_hidden = 5
-    rank = 10
-    seed = 0
+def test_potential_forward(phi_net_2x5x2):
+    """
+    Test the correctness of the forward evaluation of Phi with the first hidden
+    layer larger than the input.
+    """
 
     phi = phi_net_2x5x2
 
@@ -76,7 +77,12 @@ def test_potential_forward(phi_net_2x5x2):
                        [10.7258]])
     assert jnp.allclose(y, y_ref, rtol=1e-4)
 
+
 def test_potential_hesstrace(phi_net_2x5x2):
+    """
+    Test the correctness of the manual gradient and Hessian trace computation
+    with the first hidden layer larger than the input.
+    """
 
     phi = phi_net_2x5x2
 

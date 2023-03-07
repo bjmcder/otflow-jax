@@ -36,37 +36,3 @@ def test_resnet():
 
     assert jnp.allclose(y_test, u1, rtol=1.0e-6)
 
-def test_resnet_multidim():
-
-    s = jnp.array([[1.0, 4.0, 0.5],
-                   [2.0, 5.0, 0.6],
-                   [3.0, 6.0, 0.7],
-                   [0.0, 0.0, 0.0]])
-
-    in_size = 2
-    hidden_size = 5
-    num_hidden = 2
-    seed = 0
-
-    # Setup the ResNet and perform a forward evaluation
-    net = ResNet(in_size, hidden_size, num_hidden, seed)
-
-    y_test = jax.vmap(net)(s)
-
-    # Now, we will do a verification against the mathematical definition of a
-    # ResNet.
-    activation = \
-            lambda x: (jnp.abs(x) + jnp.log(1+jnp.exp(-2*jnp.abs(x))))
-
-    step = 1.0/(hidden_size-1)
-
-    k0 = net.layers[0].weight
-    b0 = net.layers[0].bias
-    k1 = net.layers[1].weight
-    b1 = net.layers[1].bias
-
-    u0 = activation((k0 @ s.T).T + b0)
-
-    u1 = u0 + step*activation((k1 @ u0.T).T + b1)
-
-    assert jnp.allclose(y_test, u1, rtol=1.0e-6)

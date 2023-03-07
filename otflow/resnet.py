@@ -1,7 +1,6 @@
 import jax
 
 import equinox as eqx
-import jax.nn as jnn
 import jax.numpy as jnp
 import jax.random as jr
 
@@ -120,7 +119,6 @@ class ResNet(eqx.Module):
         -------
         jax.numpy.ndarray
         """
-
         # Apply the opening layer
         y = self.activation(self.layers[0](x))
 
