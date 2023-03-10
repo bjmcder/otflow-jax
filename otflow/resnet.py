@@ -9,6 +9,7 @@ class ResNet(eqx.Module):
     """
     ResNet model to use as a trainable subnet within the OT-Flow model.
     """
+
     input_dimension: int
     hidden_dimension: int
     num_hidden_layers: int
@@ -16,12 +17,9 @@ class ResNet(eqx.Module):
     layers: list
     activation: callable
 
-
-    def __init__(self,
-                 in_size: int,
-                 hidden_size: int,
-                 num_hidden: int = 2,
-                 seed: int = 0):
+    def __init__(
+        self, in_size: int, hidden_size: int, num_hidden: int = 2, seed: int = 0
+    ):
         """
         Class Constructor for ResNet.
 
@@ -44,7 +42,7 @@ class ResNet(eqx.Module):
         self.hidden_dimension = hidden_size
         self.num_hidden_layers = num_hidden
 
-        self.step_size = 1.0/(self.num_hidden_layers-1)
+        self.step_size = 1.0 / (self.num_hidden_layers - 1)
 
         self.layers = []
 
@@ -53,16 +51,14 @@ class ResNet(eqx.Module):
 
         # Create the first layer, which maps the input size to the hidden layer
         # size
-        opening_layer = eqx.nn.Linear(self.input_dimension+1,
-                                      self.hidden_dimension,
-                                      use_bias=True,
-                                      key=key)
+        opening_layer = eqx.nn.Linear(
+            self.input_dimension + 1, self.hidden_dimension, use_bias=True, key=key
+        )
 
         # For the activation function, we use the antiderivative of the tanh
         # function. This helps with analytic gradients downstream in the
         # potential operator.
-        integral_tanh = \
-            lambda x: (jnp.abs(x) + jnp.log(1+jnp.exp(-2*jnp.abs(x))))
+        integral_tanh = lambda x: (jnp.abs(x) + jnp.log(1 + jnp.exp(-2 * jnp.abs(x))))
 
         self.activation = jax.jit(integral_tanh)
 
@@ -70,12 +66,11 @@ class ResNet(eqx.Module):
         self.layers.append(opening_layer)
 
         # Create the hidden layers
-        keys = jr.split(key, self.num_hidden_layers-1)
-        for i in range(self.num_hidden_layers-1):
-            newlayer = eqx.nn.Linear(self.hidden_dimension,
-                                     self.hidden_dimension,
-                                     use_bias=True,
-                                     key=keys[i])
+        keys = jr.split(key, self.num_hidden_layers - 1)
+        for i in range(self.num_hidden_layers - 1):
+            newlayer = eqx.nn.Linear(
+                self.hidden_dimension, self.hidden_dimension, use_bias=True, key=keys[i]
+            )
 
             self.layers.append(newlayer)
 
@@ -124,7 +119,7 @@ class ResNet(eqx.Module):
 
         # Apply the remaining layers
         for i in range(1, self.num_hidden_layers):
-            y = y.at[:].add(self.step_size*self.activation(self.layers[i](y)))
+            y = y.at[:].add(self.step_size * self.activation(self.layers[i](y)))
 
         return y
 
@@ -134,11 +129,13 @@ class ResNet(eqx.Module):
         """
         return self.layers[layer_idx](x)
 
-    def initialize_layer_params(self,
-                                key: jax.random.PRNGKey,
-                                layer_idx: int,
-                                w_init: jax.nn.initializers.Initializer,
-                                b_init: jax.nn.initializers.Initializer):
+    def initialize_layer_params(
+        self,
+        key: jax.random.PRNGKey,
+        layer_idx: int,
+        w_init: jax.nn.initializers.Initializer,
+        b_init: jax.nn.initializers.Initializer,
+    ):
         """
         Initialize the weights and biases of a layer using custom initializers.
         This overrides the default Equinox random normal initializer.
@@ -159,10 +156,12 @@ class ResNet(eqx.Module):
         self.initialize_layer_weights(key1, layer_idx, w_init)
         self.initialize_layer_biases(key2, layer_idx, b_init)
 
-    def initialize_layer_weights(self,
-                                 key: jax.random.PRNGKey,
-                                 layer_idx: int,
-                                 w_init: jax.nn.initializers.Initializer):
+    def initialize_layer_weights(
+        self,
+        key: jax.random.PRNGKey,
+        layer_idx: int,
+        w_init: jax.nn.initializers.Initializer,
+    ):
         """
         Initialize the weights of a layer using custom initializers. This
         overrides the default Equinox random normal initializer.
@@ -179,14 +178,16 @@ class ResNet(eqx.Module):
         param_select = lambda layer: layer.weight
         init_func = w_init(key, self.layers[layer_idx].weight.shape)
 
-        self.layers[layer_idx] = eqx.tree_at(param_select,
-                                             self.layers[layer_idx],
-                                             init_func)
+        self.layers[layer_idx] = eqx.tree_at(
+            param_select, self.layers[layer_idx], init_func
+        )
 
-    def initialize_layer_biases(self,
-                                key: jax.random.PRNGKey,
-                                layer_idx: int,
-                                b_init: jax.nn.initializers.Initializer):
+    def initialize_layer_biases(
+        self,
+        key: jax.random.PRNGKey,
+        layer_idx: int,
+        b_init: jax.nn.initializers.Initializer,
+    ):
         """
         Initialize the biases of a layer using custom initializers. This
         overrides the default Equinox random normal initializer.
@@ -203,9 +204,9 @@ class ResNet(eqx.Module):
         param_select = lambda layer: layer.bias
         init_func = b_init(key, self.layers[layer_idx].bias.shape)
 
-        self.layers[layer_idx] = eqx.tree_at(param_select,
-                                             self.layers[layer_idx],
-                                             init_func)
+        self.layers[layer_idx] = eqx.tree_at(
+            param_select, self.layers[layer_idx], init_func
+        )
 
     def evaluate_forward(self, x):
         """
@@ -218,13 +219,13 @@ class ResNet(eqx.Module):
             Forward input data vector.
         """
 
-        u = jnp.zeros([self.num_hidden_layers,self.hidden_dimension])
+        u = jnp.zeros([self.num_hidden_layers, self.hidden_dimension])
 
-        u = u.at[0,:].set(self.activation(self.layers[0](x)))
+        u = u.at[0, :].set(self.activation(self.layers[0](x)))
 
         for i in range(1, self.num_hidden_layers):
-            lay = self.layers[i](u[i-1])
-            u = u.at[i,:].set(u[i-1] + self.step_size*self.activation(lay))
+            lay = self.layers[i](u[i - 1])
+            u = u.at[i, :].set(u[i - 1] + self.step_size * self.activation(lay))
 
         return u
 
@@ -247,24 +248,24 @@ class ResNet(eqx.Module):
         h = self.step_size
         n = self.num_hidden_layers
 
-        z = jnp.zeros([self.num_hidden_layers-1, self.hidden_dimension])
+        z = jnp.zeros([self.num_hidden_layers - 1, self.hidden_dimension])
 
         # Evaluate the layers in revese order, storing the intermediate
         # activations in z.
-        for i in range(n-1, 0, -1):
-            if i == n-1:
+        for i in range(n - 1, 0, -1):
+            if i == n - 1:
                 term = w.T
             else:
-                term = z[i+1]
+                term = z[i + 1]
 
             K_i = self.layers[i].weight
-            dlayer = jax.nn.tanh(self.layers[i](u[i-1]))
+            dlayer = jax.nn.tanh(self.layers[i](u[i - 1]))
 
-            hku = jnp.expand_dims(h*(K_i.T @ dlayer).T, axis=1)
-            term = term.reshape(term.shape[0],1)
+            hku = jnp.expand_dims(h * (K_i.T @ dlayer).T, axis=1)
+            term = term.reshape(term.shape[0], 1)
 
             new_z = (term + jnp.multiply(hku, term)).squeeze(1)
-            z = z.at[i-1].set(new_z)
+            z = z.at[i - 1].set(new_z)
 
         # Finally, handle the input layer separately, which is not necessarily
         # the same size as the hidden layers

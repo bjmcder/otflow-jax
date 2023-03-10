@@ -5,7 +5,8 @@ import jax.nn as jnn
 import jax.numpy as jnp
 import jax.random as jr
 
-from resnet import ResNet
+from otflow.resnet import ResNet
+
 
 class PotentialOperator(eqx.Module):
     N: eqx.Module
@@ -13,12 +14,7 @@ class PotentialOperator(eqx.Module):
     c: eqx.Module
     w: eqx.Module
 
-    def __init__(self,
-                 in_size,
-                 hidden_size,
-                 num_hidden=2,
-                 rank=10,
-                 seed=0):
+    def __init__(self, in_size, hidden_size, num_hidden=2, rank=10, seed=0):
         """
         Class constructor.
         """
@@ -31,18 +27,15 @@ class PotentialOperator(eqx.Module):
 
         # Create the ResNet subnet used in the potential model
         seed_n = int(jnp.sum(key_n))
-        self.N = ResNet(in_size,
-                        hidden_size,
-                        num_hidden,
-                        seed=seed_n)
+        self.N = ResNet(in_size, hidden_size, num_hidden, seed=seed_n)
 
         # Create the A matrix operator
         a_init = jnn.initializers.glorot_uniform()
-        self.A = a_init(key_a, [jnp.minimum(rank, in_size+1), in_size+1])
+        self.A = a_init(key_a, [jnp.minimum(rank, in_size + 1), in_size + 1])
 
         # Create the c and w functions, which we can express as linear layer
         # modules.
-        self.c = eqx.nn.Linear(in_size+1, 1, use_bias=True, key=key_c)
+        self.c = eqx.nn.Linear(in_size + 1, 1, use_bias=True, key=key_c)
         self.w = eqx.nn.Linear(hidden_size, 1, use_bias=False, key=key_w)
 
         # To initialize the c and w parameters, we have to use PyTree
@@ -55,7 +48,7 @@ class PotentialOperator(eqx.Module):
         self.c = eqx.tree_at(lambda l: l.bias, self.c, cb_init)
         self.w = eqx.tree_at(lambda l: l.weight, self.w, ww_init)
 
-    def __call__(self, x:jnp.ndarray):
+    def __call__(self, x: jnp.ndarray):
         """
         Convenience function for calling the forward pass.
 
@@ -73,7 +66,7 @@ class PotentialOperator(eqx.Module):
 
         return fwd(x)
 
-    def forward(self, x:jnp.ndarray):
+    def forward(self, x: jnp.ndarray):
         """
         Evaluate the model in the forward direction. The forward model is not
         invoked typically in an OT-Flow problem, as the gradient and Hessian
@@ -94,7 +87,7 @@ class PotentialOperator(eqx.Module):
 
         # Compute Φ(x) = w'N(x) + 0.5x'(A'A)x + b'x + c
         wn = self.w(self.N(x))
-        ax = 0.5 * jnp.sum((x @ A_symm)*x, keepdims=True)
+        ax = 0.5 * jnp.sum((x @ A_symm) * x, keepdims=True)
         bc = self.c(x)
 
         return wn + ax + bc
@@ -161,84 +154,34 @@ class PotentialOperator(eqx.Module):
         # 2. Compute the Hessian trace
         dtanh = lambda x: 1 - jnp.power(jax.nn.tanh(x), 2)
 
-        tanh_0 = jax.nn.tanh(self.N.evaluate_layer(x,0))
-        dtanh_0 = dtanh(self.N.evaluate_layer(x,0))
+        tanh_0 = jax.nn.tanh(self.N.evaluate_layer(x, 0))
+        dtanh_0 = dtanh(self.N.evaluate_layer(x, 0))
 
         # Compute the trace of the opening layer
         K_0d = self.N.layers[0].weight[:, 0:d]
 
         tr_h = jnp.sum((dtanh_0.T * z[0]) * jnp.power(K_0d, 2).T)
-        jac = (K_0d.T * tanh_0)
+        jac = K_0d.T * tanh_0
 
         # Compute the trace of the remaining layers
         for i in range(1, self.N.num_hidden_layers):
             K_id = self.N.layers[i].weight
             KJ_i = K_id @ jac.T
 
-            if i == self.N.num_hidden_layers-1:
+            if i == self.N.num_hidden_layers - 1:
                 term = self.w.weight.T
             else:
-                term = z[i+1]
+                term = z[i + 1]
 
-            lay_i = self.N.evaluate_layer(u[i-1], i)
+            lay_i = self.N.evaluate_layer(u[i - 1], i)
             dtanh_i = dtanh(lay_i)
 
             t_ia = dtanh_i * term.T
             t_ib = jnp.power(KJ_i, 2)
-            t_i = jnp.sum(t_ia  * t_ib.T)
+            t_i = jnp.sum(t_ia * t_ib.T)
 
-            tr_h += h*t_i
+            tr_h += h * t_i
 
-        tr_h += jnp.trace(A_symm[0:d,0:d])
+        tr_h += jnp.trace(A_symm[0:d, 0:d])
 
         return grad.squeeze(0), tr_h
-
-if __name__ == "__main__":
-
-    import os
-    import time
-
-    in_size = 2
-    hidden_size = 5
-    num_hidden = 2
-    rank = 10
-    seed = 0
-
-    key = jr.PRNGKey(seed)
-
-    phi = PotentialOperator(in_size, hidden_size, num_hidden, rank, seed)
-
-    w0_init = jnn.initializers.constant(0.1)
-    b0_init = jnn.initializers.constant(0.2)
-
-    phi.N.initialize_layer_params(key, 0, w0_init, b0_init)
-
-
-    w_init = jnn.initializers.constant(0.3)
-    b_init = jnn.initializers.constant(0.3)
-    phi.N.initialize_layer_params(key, 1, w_init, b_init)
-
-    s = jnp.array([[1.0, 4.0, 0.5],
-                   [2.0, 5.0, 0.6],
-                   [3.0, 6.0, 0.7],
-                   [0.0, 0.0, 0.0]])
-
-    y = jax.vmap(phi)(s)
-
-    #jax.vmap(phi.N.forward_scan)(s)
-
-
-    d = 200
-    m = 32
-    nlay = 5
-    nex = 1000
-
-    net2 = PotentialOperator(d, m, nlay, seed=seed)
-
-    key = jr.PRNGKey(25)
-    x = jr.normal(key, [nex,d+1])
-    y = jax.vmap(net2)(x)
-    g, h = jax.vmap(net2.hessian_trace)(x)
-    start = time.time()
-    g, h = jax.vmap(net2.hessian_trace)(x)
-    print('traceHess takes ', time.time()-start)
